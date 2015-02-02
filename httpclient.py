@@ -35,18 +35,40 @@ class HTTPRequest(object):
 class HTTPClient(object):
     #def get_host_port(self,url):
 
+    def __init__(self):
+        self.s = ''
+
     def connect(self, host, port):
-        # use sockets!
-        return None
+        # Create a socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        except socket.error as msg:
+            print('Failed to create socket!')
+            print('Error code: ' + str(msg[0]) + ', error mesage: ' + msg[1])
+            sys.exit()
+
+        # Make connection
+        try:
+            remote_ip = socket.gethostbyname(host)
+        except socket.gaierror:
+            print('Host name could not be resolved')
+            sys.exit()
+        sock.connect((remote_ip, port))
+        return sock
 
     def get_code(self, data):
-        return None
+        code = data.split(' ')[1]
+        code = int(code)
+        return code
 
     def get_headers(self,data):
-        return None
+        headers = data.split('\r\n\r\n')[0]
+        return headers
 
-    def get_body(self, data):
-        return None
+    def get_body(self, data):        
+        index = data.find('\r\n\r\n')
+        body = data[index+4:]
+        return body
 
     # read everything from the socket
     def recvall(self, sock):
@@ -63,11 +85,98 @@ class HTTPClient(object):
     def GET(self, url, args=None):
         code = 500
         body = ""
+        
+        # parse url for host, port and path
+        base = ""
+        index = -1
+        host = ""
+        port = 80
+        path = ""
+    
+        index = url.find('://')
+        base = url[index+3:]
+        
+        index = base.find('/')
+        if index > 0:
+            path = base[index:]
+            base = base[:index]
+        else:
+            path = "/"
+        
+        index = base.find(':')
+        if index > 0:
+            host = base[:index]
+            port = int(base[index+1:])
+        else:
+            host = base
+            port = 80
+
+        # make message
+        message =\
+            "GET %s HTTP/1.1\r\n" % path +\
+            "Host: %s\r\n" % host +\
+            "Content-Type: application/x-www-form-urlencoded\r\n" +\
+            "\r\n"
+
+        # make connection
+        sock = self.connect(host, port)
+        
+        # send get request        
+        try:
+            sock.sendall(message.encode("UTF8"))
+        except socket.error:
+            print('Send GET failed!')
+            sys.exit()
+        
+        # Get response
+        data = self.recvall(sock)
+        code = self.get_code(data)
+        body = self.get_body(data)
+
         return HTTPRequest(code, body)
 
     def POST(self, url, args=None):
         code = 500
         body = ""
+
+        # parse url for host, port and path
+        base = url.split('://')[1]
+        host = base.split(':')[0]
+        port_str = base.split(':')[1].split('/')[0]
+        port = int(port_str)
+        path = base.split(port_str)[1]
+        
+        # parse args for body
+        if args != None:
+            for key in args:
+                body = body + key + '=' + args.get(key) + '&'
+            body = body[:len(body)-1]
+                   
+        # make message
+        message =\
+            "POST %s HTTP/1.1\r\n" % path +\
+            "Host: %s\r\n" % host +\
+            "Content-Type: application/x-www-form-urlencoded\r\n" +\
+            "Content-Length: %s\r\n" % len(body) +\
+            "\r\n" +\
+            body
+        
+        # make connection
+        sock = self.connect(host, port)        
+
+        # send post request
+        try:
+            sock.sendall(message.encode("UTF8"))
+        except socket.error:
+            print('Send POST failed!')
+            sys.exit()
+        print('POST sent successfully.')
+        
+        # get response
+        data = self.recvall(sock)
+        code = self.get_code(data)
+        body = self.get_body(data)
+
         return HTTPRequest(code, body)
 
     def command(self, url, command="GET", args=None):
@@ -75,6 +184,7 @@ class HTTPClient(object):
             return self.POST( url, args )
         else:
             return self.GET( url, args )
+    
     
 if __name__ == "__main__":
     client = HTTPClient()
